@@ -64,6 +64,7 @@ def poll_ups_data(ups_state):
 
 def shutdown_os():
     logging.info("Initiating OS and UPS shutdown... goodbye!")
+    time.sleep(1)
     if(not args.test):
         bus.write_byte_data(UPS_DEVICE_ADDR, UPS_POWEROFF_REGISTER, UPS_POWEROFF_DELAY)
         os.system("sudo sync && sudo halt")
