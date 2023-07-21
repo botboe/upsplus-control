@@ -7,7 +7,6 @@ import smbus2
 import logging
 import argparse
 import sys
-from ina219 import INA219,DeviceRangeError
 
 # https://wiki.52pi.com/index.php?title=EP-0136
 
@@ -25,6 +24,19 @@ UPS_POWEROFF_DELAY = 20
 CHECK_INTERVAL = 5
 
 
+### Battery settings
+# More info here: https://wiki.52pi.com/index.php/EP-0136#Register_Mapping
+
+# Set the "Full Voltage" in mV
+BATTERY_VOLTAGE_FULL = 4100
+
+# Set the "Empty Voltage" in mV
+BATTERY_VOLTAGE_EMPTY = 3200
+
+# Set the "Protection Voltage" in mV
+BATTERY_VOLTAGE_PROTECTION = 3000
+
+
 ### I2C-settings ###
 # Define I2C bus
 DEVICE_BUS = 1
@@ -35,12 +47,24 @@ UPS_DEVICE_ADDR = 0x17
 # Register for shutting down the ups
 UPS_POWEROFF_REGISTER = 0x18
 
+UPS_REGISTER_BATTERY_FULL_H = 0x0D
+UPS_REGISTER_BATTERY_FULL_L = 0x0E
+UPS_REGISTER_BATTERY_EMPTY_H = 0x0F
+UPS_REGISTER_BATTERY_EMPTY_L = 0x10
+UPS_REGISTER_BATTERY_PROTECTION_H = 0x11
+UPS_REGISTER_BATTERY_PROTECTION_L = 0x12
+
+# Initiate communication with MCU via i2c protocol.
+bus = smbus2.SMBus(DEVICE_BUS)
 
 class UpsState:
     """Contains the UPS' current state"""
     input_voltage_micro_usb = 0
     input_voltage_usb_c = 0
     current_runtime = 0
+    battery_voltage_full = 0
+    battery_voltage_empty = 0
+    battery_voltage_protection = 0
 
     def is_on_battery(self):
         return (self.input_voltage_usb_c < 1000) and (self.input_voltage_micro_usb < 1000)
@@ -57,10 +81,13 @@ def poll_ups_data(ups_state):
     for i in range(1, 255):
         aReceiveBuf.append(bus.read_byte_data(UPS_DEVICE_ADDR, i))
 
-    ups_state.input_voltage_usb_c       = (aReceiveBuf[8] << 8 | aReceiveBuf[7])
-    ups_state.input_voltage_micro_usb   = (aReceiveBuf[10] << 8 | aReceiveBuf[9])
-    ups_state.current_runtime           = (aReceiveBuf[0x27] << 24 | aReceiveBuf[0x26] << 16 | aReceiveBuf[0x25] << 8 | aReceiveBuf[0x24])
-    return aReceiveBuf
+    ups_state.input_voltage_usb_c           = (aReceiveBuf[8] << 8 | aReceiveBuf[7])
+    ups_state.input_voltage_micro_usb       = (aReceiveBuf[10] << 8 | aReceiveBuf[9])
+    ups_state.current_runtime               = (aReceiveBuf[0x27] << 24 | aReceiveBuf[0x26] << 16 | aReceiveBuf[0x25] << 8 | aReceiveBuf[0x24])
+    ups_state.battery_voltage_full          = (aReceiveBuf[0x0E] << 8 | aReceiveBuf[0x0D])
+    ups_state.battery_voltage_empty         = (aReceiveBuf[0x10] << 8 | aReceiveBuf[0x0F])
+    ups_state.battery_voltage_protection    = (aReceiveBuf[0x12] << 8 | aReceiveBuf[0x11])
+
 
 def shutdown_os():
     logging.info("Initiating OS and UPS shutdown... goodbye!")
@@ -70,9 +97,29 @@ def shutdown_os():
         os.system("sudo sync && sudo halt")
     quit()
 
-def write_settings():
-    logging.info("Writing Settings to UPS")
-    quit()
+def write_battery_config():
+    logging.info("Writing new battery settings to UPS")
+    show_battery_config()
+    logging.info("\n=== New battery settings ===")
+    logging.info("Full Voltage: "       + str(BATTERY_VOLTAGE_FULL) + "mV")
+    logging.info("Empty Voltage: "      + str(BATTERY_VOLTAGE_EMPTY) + "mV")
+    logging.info("Protection Voltage: " + str(BATTERY_VOLTAGE_PROTECTION) + "mV")
+    bus.write_byte_data(UPS_DEVICE_ADDR, UPS_REGISTER_BATTERY_PROTECTION_H, BATTERY_VOLTAGE_PROTECTION & 0xFF)
+    bus.write_byte_data(UPS_DEVICE_ADDR, UPS_REGISTER_BATTERY_PROTECTION_L, (BATTERY_VOLTAGE_PROTECTION >> 8) & 0xFF)
+    
+    # No function!?
+    bus.write_byte_data(UPS_DEVICE_ADDR, UPS_REGISTER_BATTERY_FULL_H,       BATTERY_VOLTAGE_FULL & 0xFF)
+    bus.write_byte_data(UPS_DEVICE_ADDR, UPS_REGISTER_BATTERY_FULL_L,       (BATTERY_VOLTAGE_FULL >> 8) & 0xFF)
+    bus.write_byte_data(UPS_DEVICE_ADDR, UPS_REGISTER_BATTERY_EMPTY_H,      BATTERY_VOLTAGE_EMPTY & 0xFF)
+    bus.write_byte_data(UPS_DEVICE_ADDR, UPS_REGISTER_BATTERY_EMPTY_L,      (BATTERY_VOLTAGE_EMPTY >> 8) & 0xFF)
+
+def show_battery_config():
+    ups_state = UpsState()
+    poll_ups_data(ups_state)
+    logging.info("=== Current battery settings ===")
+    logging.info("Full Voltage: " + str(ups_state.battery_voltage_full) + "mV")
+    logging.info("Empty Voltage: " + str(ups_state.battery_voltage_empty) + "mV")
+    logging.info("Protection Voltage: " + str(ups_state.battery_voltage_protection) + "mV")
 
 if __name__ == "__main__":
 
@@ -81,7 +128,9 @@ if __name__ == "__main__":
     parser.add_argument("--debug",          "-d",   action='store_true', help="runs the daemon in debug-mode")
     parser.add_argument("--shutdown",       "-s",   action='store_true', help="shutdown os and ups immediately")
     parser.add_argument("--test",           "-t",   action='store_true', help="testmode without shutdown")
-    parser.add_argument("--write-config",   "-w",   action='store_true', help="writes settings to UPS-board", dest='writeconfig')
+    parser.add_argument("--write-battery-config",   action='store_true', help="writes battery settings to UPS-board",   dest='writebatteryconfig')
+    parser.add_argument("--show-battery-config",    action='store_true', help="shows current battery settings",         dest='showbatteryconfig')
+
     args = parser.parse_args()
 
     # set up logging
@@ -94,9 +143,15 @@ if __name__ == "__main__":
     if args.shutdown:
         shutdown_os()
 
+    # Show battery settings
+    if args.showbatteryconfig:
+        show_battery_config()
+        quit()
+ 
     # Write settings to UPS-hardware
-    if args.writeconfig:
-        write_settings()
+    if args.writebatteryconfig:
+        write_battery_config()
+        quit()
 
     # Starting main-job
     logging.debug("Python version: %s" % sys.version)
@@ -104,16 +159,12 @@ if __name__ == "__main__":
     if(args.test):
         logging.info("Running in Test-Mode - No automatic shutdown!")
 
-    # Initiate communication with MCU via i2c protocol.
-    bus = smbus2.SMBus(DEVICE_BUS)
-
-
-
     ups_state = UpsState()
     poll_ups_data(ups_state)
     prev_is_on_battery = ups_state.is_on_battery()
     if(ups_state.is_on_battery()):
         timestamp_begin_on_battery = time.time()
+
 
     logging.debug("Starts watching UPS-state")
     logging.info("Current power-state: " + ups_state.power_state_str())

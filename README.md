@@ -10,11 +10,6 @@ Toolset for interaction with the Raspberry-PI UPS ["UPS Plus"]([LICENSE](https:/
     > 3 Interface Options > I5 I2C > Yes
     ```
 
-* Clone this repository:
-    ```
-    git clone https://github.com/botboe/upsplus-control.git
-    ```
-
 * Install necessary dependencies:
     ```
     sudo apt-get update
@@ -23,5 +18,21 @@ Toolset for interaction with the Raspberry-PI UPS ["UPS Plus"]([LICENSE](https:/
     pip3 install smbus smbus2
     ```
 
+* Clone this repository:
+    ```
+    git clone https://github.com/botboe/upsplus-control.git
+    ```
 
 ## Usage
+
+### Dryrun
+Disables the shutdown-functionality to test and debug the behavior
+```
+python3 ./upsplus_control.py --<OPTION> --test
+```
+
+### Shutdown OS followed by UPS
+```
+python3 ./upsplus_control.py --shutdown
+```
+
