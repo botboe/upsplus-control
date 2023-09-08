@@ -7,12 +7,13 @@ import smbus2
 import logging
 import argparse
 import sys
+import subprocess
 
 # https://wiki.52pi.com/index.php?title=EP-0136
 
 ### General settings ###
 # Set the threshold of UPS automatic power-off to prevent damage caused by battery over-discharge, unit: mV.
-PROTECT_VOLT = 3500
+PROTECT_VOLT = 3100
 
 # Set the time on battery before automatic shutdown, e. g. initiate a shutdown after a defined period after shutting down the powersupply
 TIME_ON_BATTERY_BEFORE_SHUTDOWN = 20
@@ -23,6 +24,9 @@ UPS_POWEROFF_DELAY = 20
 # Set the interval between the checks of the ups-state
 CHECK_INTERVAL = 5
 
+# Call a script before initiating the shutdown
+BEFORE_SHUTDOWN_SCRIPT = "/home/pi/upsplus-control/before_shutdown.sh"
+
 
 ### Battery settings
 # More info here: https://wiki.52pi.com/index.php/EP-0136#Register_Mapping
@@ -31,10 +35,10 @@ CHECK_INTERVAL = 5
 BATTERY_VOLTAGE_FULL = 4100
 
 # Set the "Empty Voltage" in mV
-BATTERY_VOLTAGE_EMPTY = 3200
+BATTERY_VOLTAGE_EMPTY = 3000
 
 # Set the "Protection Voltage" in mV
-BATTERY_VOLTAGE_PROTECTION = 3000
+BATTERY_VOLTAGE_PROTECTION = 3100
 
 
 ### I2C-settings ###
@@ -88,15 +92,6 @@ def poll_ups_data(ups_state):
     ups_state.battery_voltage_empty         = (aReceiveBuf[0x10] << 8 | aReceiveBuf[0x0F])
     ups_state.battery_voltage_protection    = (aReceiveBuf[0x12] << 8 | aReceiveBuf[0x11])
 
-
-def shutdown_os():
-    logging.info("Initiating OS and UPS shutdown... goodbye!")
-    time.sleep(1)
-    if(not args.test):
-        bus.write_byte_data(UPS_DEVICE_ADDR, UPS_POWEROFF_REGISTER, UPS_POWEROFF_DELAY)
-        os.system("sudo sync && sudo halt")
-    quit()
-
 def write_battery_config():
     logging.info("Writing new battery settings to UPS")
     show_battery_config()
@@ -121,6 +116,27 @@ def show_battery_config():
     logging.info("Empty Voltage: " + str(ups_state.battery_voltage_empty) + "mV")
     logging.info("Protection Voltage: " + str(ups_state.battery_voltage_protection) + "mV")
 
+def set_ups_poweroff_timer():
+    bus.write_byte_data(UPS_DEVICE_ADDR, UPS_POWEROFF_REGISTER, UPS_POWEROFF_DELAY)
+
+def shutdown_os():
+    logging.info("Initiating OS and UPS shutdown... goodbye!")
+    time.sleep(1)
+
+    try:
+        if BEFORE_SHUTDOWN_SCRIPT:
+            logging.info("Trying to run before-shutdown-script")
+            logging.info(subprocess.run([BEFORE_SHUTDOWN_SCRIPT,
+                        ""], shell=True))
+    except Exception as e:
+        logging.info("Could not run before-shutdown-script:")
+        logging.info(str(e))
+
+
+    if(not args.test):
+        set_ups_poweroff_timer()
+        os.system("sudo sync && sudo halt")
+
 if __name__ == "__main__":
 
     # Read options and configuration
@@ -142,6 +158,7 @@ if __name__ == "__main__":
     # Shutdown OS and UPS directly
     if args.shutdown:
         shutdown_os()
+        quit()
 
     # Show battery settings
     if args.showbatteryconfig:

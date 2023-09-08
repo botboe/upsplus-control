@@ -1,0 +1,11 @@
+[Unit]
+Description=Controls the RPi depending on the UPS's state
+
+[Service]
+WorkingDirectory=/home/pi/upsplus-control/
+User=pi
+ExecStart=python3 /home/pi/upsplus-control/upsplus_control.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
